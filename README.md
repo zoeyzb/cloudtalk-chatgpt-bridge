@@ -20,3 +20,5 @@ The endpoint supports:
 - `voiceagent_api_request`
 
 Deployment trigger: CloudTalk credentials configured on Vercel.
+
+Git deployment trigger check: latest main push.
