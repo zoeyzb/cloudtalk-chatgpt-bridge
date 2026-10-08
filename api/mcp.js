@@ -1,15 +1,14 @@
 const CLOUDTALK_BASE = "https://api.cloudtalk.io";
+const PRIVATE_MCP_PATH = "/api/mcp-hqyCRMC_axNWmv2mXh30zY0JYJZ3LTX2";
 
 function sendJson(res, status, body) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json; charset=utf-8");
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-methods", "POST, GET, OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type, authorization, mcp-session-id");
+  res.setHeader("access-control-expose-headers", "mcp-session-id");
   res.end(JSON.stringify(body));
-}
-
-function isAuthorized(req) {
-  const expected = process.env.BRIDGE_TOKEN;
-  if (!expected) return false;
-  return (req.headers.authorization || "") === `Bearer ${expected}`;
 }
 
 function cloudTalkAuth() {
@@ -38,11 +37,8 @@ async function cloudTalkRequest(method, path, body) {
 
   const raw = await response.text();
   let data;
-  try {
-    data = raw ? JSON.parse(raw) : null;
-  } catch {
-    data = { raw };
-  }
+  try { data = raw ? JSON.parse(raw) : null; }
+  catch { data = { raw }; }
 
   return { ok: response.ok, status: response.status, data };
 }
@@ -50,16 +46,13 @@ async function cloudTalkRequest(method, path, body) {
 const tools = [
   {
     name: "bridge_status",
-    description: "Check whether the bridge is running and whether CloudTalk credentials are configured. Never exposes secrets.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false
-    }
+    description: "Check whether the private CloudTalk bridge is online and whether CloudTalk credentials are configured. Never exposes secrets.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true }
   },
   {
     name: "start_voiceagent_call",
-    description: "Start one outbound CloudTalk VoiceAgent call. Use E.164 format such as +13125551234.",
+    description: "Start one outbound CloudTalk VoiceAgent call. Use only when the user explicitly asks to place or test a call. Use E.164 format such as +13125551234.",
     inputSchema: {
       type: "object",
       properties: {
@@ -68,26 +61,28 @@ const tools = [
         variables: {
           type: "object",
           additionalProperties: true,
-          description: "Optional per-call variables such as business_name, preview_url, website_status."
+          description: "Optional per-call context such as business_name, preview_url, website_status."
         }
       },
       required: ["call_number", "voice_agent_id"],
       additionalProperties: false
-    }
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false }
   },
   {
     name: "voiceagent_api_request",
-    description: "Read or update a CloudTalk VoiceAgent API endpoint under /v1/voice-agent/. Use only after the exact CloudTalk path and payload are known.",
+    description: "Read or update a CloudTalk VoiceAgent API endpoint under /v1/voice-agent/. Use GET for reads; use POST, PATCH, or PUT only when the user asks for a change.",
     inputSchema: {
       type: "object",
       properties: {
         method: { type: "string", enum: ["GET", "POST", "PATCH", "PUT"] },
-        path: { type: "string" },
+        path: { type: "string", description: "CloudTalk path beginning with /v1/voice-agent/" },
         body: { type: "object", additionalProperties: true }
       },
       required: ["method", "path"],
       additionalProperties: false
-    }
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false }
   }
 ];
 
@@ -109,9 +104,7 @@ async function runTool(name, args) {
     };
 
     if (args.variables && Object.keys(args.variables).length > 0) {
-      payload.call_properties = {
-        system_prompt: args.variables
-      };
+      payload.call_properties = { system_prompt: args.variables };
     }
 
     return cloudTalkRequest("POST", "/v1/voice-agent/calls", payload);
@@ -125,6 +118,20 @@ async function runTool(name, args) {
 }
 
 export default async function handler(req, res) {
+  const pathname = new URL(req.url, "https://bridge.local").pathname;
+  if (pathname !== PRIVATE_MCP_PATH) {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("access-control-allow-methods", "POST, GET, OPTIONS");
+    res.setHeader("access-control-allow-headers", "content-type, authorization, mcp-session-id");
+    res.setHeader("access-control-expose-headers", "mcp-session-id");
+    return res.end();
+  }
+
   if (req.method === "GET") {
     return sendJson(res, 200, {
       ok: true,
@@ -136,24 +143,14 @@ export default async function handler(req, res) {
     });
   }
 
-  if (req.method === "OPTIONS") {
-    res.statusCode = 204;
-    return res.end();
-  }
-
   if (req.method !== "POST") {
     return sendJson(res, 405, { error: "method_not_allowed" });
-  }
-
-  if (!isAuthorized(req)) {
-    return sendJson(res, 401, { error: "unauthorized" });
   }
 
   const body =
     typeof req.body === "string"
       ? JSON.parse(req.body || "{}")
       : (req.body || {});
-
   const id = body.id ?? null;
 
   try {
@@ -164,10 +161,7 @@ export default async function handler(req, res) {
         result: {
           protocolVersion: "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: {
-            name: "cloudtalk-chatgpt-bridge",
-            version: "1.0.0"
-          }
+          serverInfo: { name: "cloudtalk-chatgpt-bridge", version: "1.1.0" }
         }
       });
     }
@@ -175,6 +169,10 @@ export default async function handler(req, res) {
     if (body.method === "notifications/initialized") {
       res.statusCode = 204;
       return res.end();
+    }
+
+    if (body.method === "ping") {
+      return sendJson(res, 200, { jsonrpc: "2.0", id, result: {} });
     }
 
     if (body.method === "tools/list") {
@@ -195,9 +193,7 @@ export default async function handler(req, res) {
         jsonrpc: "2.0",
         id,
         result: {
-          content: [
-            { type: "text", text: JSON.stringify(result) }
-          ],
+          content: [{ type: "text", text: JSON.stringify(result) }],
           structuredContent: result
         }
       });
@@ -206,19 +202,13 @@ export default async function handler(req, res) {
     return sendJson(res, 200, {
       jsonrpc: "2.0",
       id,
-      error: {
-        code: -32601,
-        message: "Method not found"
-      }
+      error: { code: -32601, message: "Method not found" }
     });
   } catch (error) {
     return sendJson(res, 200, {
       jsonrpc: "2.0",
       id,
-      error: {
-        code: -32000,
-        message: error?.message || "Bridge error"
-      }
+      error: { code: -32000, message: error?.message || "Bridge error" }
     });
   }
 }
