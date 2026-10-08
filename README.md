@@ -18,3 +18,5 @@ The endpoint supports:
 - `bridge_status`
 - `start_voiceagent_call`
 - `voiceagent_api_request`
+
+Deployment trigger: CloudTalk credentials configured on Vercel.
