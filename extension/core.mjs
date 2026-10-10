@@ -24,12 +24,14 @@ export function reduceCall(current,event){
   current={call_uuid:event.call_uuid,number:event.number,contact_id:event.contact_id,name:event.name,company:event.company,answered:false,ended:false,seen:[]};
  }
  if(current.ended&&event.event!=='ended')return {error:'Stale event after call end'};
+ if(current.hangup_requested&&event.event==='calling')return {error:'Stale answer after hang-up'};
  if(event.number&&current.number&&event.number!==current.number)return {error:'Call number changed unexpectedly'};
  if(event.contact_id&&current.contact_id&&event.contact_id!==current.contact_id)return {error:'Contact changed unexpectedly'};
  const next={...current,number:current.number??event.number,contact_id:current.contact_id??event.contact_id,name:event.name??current.name,company:event.company??current.company};
  const key=JSON.stringify(event);if(next.seen.includes(key))return {call:next,duplicate:true};
  next.seen=[...next.seen.slice(-29),key];next.event=event.event;
  if(event.event==='calling')next.answered=true;
+ if(event.event==='hangup')next.hangup_requested=true;
  if(event.event==='ended')next.ended=true;
  return {call:next};
 }
