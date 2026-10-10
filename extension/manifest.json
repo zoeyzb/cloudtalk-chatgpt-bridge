@@ -1,0 +1,13 @@
+{
+ "manifest_version":3,"name":"Sierra Call Bridge","version":"1.0.0",
+ "description":"Connect CloudTalk webphone events to one selected ChatGPT Voice chat and your private contact-writing bridge.",
+ "permissions":["storage"],
+ "host_permissions":["https://chatgpt.com/*","https://cloudtalk-control.zzoey9979.chatgpt.site/*"],
+ "background":{"service_worker":"background.mjs","type":"module"},
+ "action":{"default_title":"Open Sierra Call Bridge"},
+ "content_scripts":[
+  {"matches":["https://chatgpt.com/*"],"js":["gpt.js"],"run_at":"document_idle"},
+  {"matches":["https://cloudtalk-control.zzoey9979.chatgpt.site/*"],"js":["site.js"],"run_at":"document_idle"}
+ ],
+ "content_security_policy":{"extension_pages":"script-src 'self'; object-src 'none'; frame-src https://phone.cloudtalk.io;"}
+}
